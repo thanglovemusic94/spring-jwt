@@ -1,16 +1,21 @@
 package com.bezkoder.springjwt.controllers;
 
+import com.bezkoder.springjwt.exception.TokenRefreshException;
 import com.bezkoder.springjwt.models.ERole;
+import com.bezkoder.springjwt.models.RefreshToken;
 import com.bezkoder.springjwt.models.Role;
 import com.bezkoder.springjwt.models.User;
 import com.bezkoder.springjwt.payload.request.LoginRequest;
 import com.bezkoder.springjwt.payload.request.SignupRequest;
+import com.bezkoder.springjwt.payload.request.TokenRefreshRequest;
 import com.bezkoder.springjwt.payload.response.JwtResponse;
 import com.bezkoder.springjwt.payload.response.MessageResponse;
 import com.bezkoder.springjwt.repository.RoleRepository;
 import com.bezkoder.springjwt.repository.UserRepository;
 import com.bezkoder.springjwt.security.jwt.JwtUtils;
 import com.bezkoder.springjwt.security.services.AuthenticationFacade;
+import com.bezkoder.springjwt.security.services.UserDetailsImpl;
+import com.bezkoder.springjwt.service.RefreshTokenService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -39,12 +44,16 @@ public class AuthController {
   @Autowired
   JwtUtils jwtUtils;
 
+  @Autowired
+  RefreshTokenService refreshTokenService;
+
   @PostMapping("/signin")
   public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
 
     authenticationFacade.setAuthentication(loginRequest.getUsername(), loginRequest.getPassword());
     String jwt = jwtUtils.generateJwtToken();
-    return ResponseEntity.ok(new JwtResponse(jwt));
+    RefreshToken refreshToken = refreshTokenService.createRefreshToken(authenticationFacade.getAuthentication().getId());
+    return ResponseEntity.ok(new JwtResponse(jwt, refreshToken.getToken()));
   }
 
   @PostMapping("/signup")
@@ -100,5 +109,20 @@ public class AuthController {
     userRepository.save(user);
 
     return ResponseEntity.ok(new MessageResponse("User registered successfully!"));
+  }
+
+  @PostMapping("/refreshtoken")
+  public ResponseEntity<?> refreshtoken(@Valid @RequestBody TokenRefreshRequest request) {
+    UserDetailsImpl a = authenticationFacade.getAuthentication();
+    String requestRefreshToken = request.getRefreshToken();
+    return refreshTokenService.findByToken(requestRefreshToken)
+            .map(refreshTokenService::verifyExpiration)
+            .map(RefreshToken::getUser)
+            .map(user -> {
+              String token = jwtUtils.generateJwtToken();
+              return ResponseEntity.ok(new JwtResponse(token, requestRefreshToken));
+            })
+            .orElseThrow(() -> new TokenRefreshException(requestRefreshToken,
+                    "Refresh token is not in database!"));
   }
 }
